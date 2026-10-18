@@ -1,0 +1,21 @@
+{
+  "name": "tiktoklivenotify",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "discord.js": "14.27.0",
+    "tiktok-live-connector": "2.5.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
