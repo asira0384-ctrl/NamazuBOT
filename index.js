@@ -4,6 +4,7 @@ import http from 'node:http';
 import { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } from 'discord.js';
 import { resolveLive } from './detector.js';
 import { createRolePanels, rolePanelCommand } from './rolepanels.js';
+import { createVoiceGuard, voiceGuardCommand } from './voiceguard.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !GUILD_ID) throw new Error('RailwayにDISCORD_TOKENとGUILD_IDを設定してください');
@@ -14,7 +15,7 @@ let state = { user: '', channel: '', role: '', message: '{user} がTikTok LIVE�
 if (fs.existsSync(file)) state = { ...state, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
 function save() { fs.writeFileSync(file + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 }); fs.renameSync(file + '.tmp', file); }
 save();
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 const health = { checked: 'なし', result: '未確認', error: '', sent: 'なし', details: {}, action: 'なし' };
 const configuredInterval = Number(process.env.POLL_SECONDS || 10);
 const intervalMs = (Number.isFinite(configuredInterval) ? Math.max(10, configuredInterval) : 10) * 1000;
@@ -84,8 +85,11 @@ function status() {
     '確認間隔: ' + intervalMs / 1000 + '秒', '状態: ' + health.result, '処理: ' + health.action, '最終確認: ' + health.checked, '最終送信: ' + health.sent, 'エラー: ' + (health.error || 'なし'),
     '通知文:\n' + state.message].join('\n').slice(0, 1950);
 }
+const voiceGuard = createVoiceGuard({ client, guildId: GUILD_ID, dir, safeError });
+client.on('voiceStateUpdate', (oldState, newState) => { voiceGuard.onVoiceState(oldState, newState).catch(e => console.error('[VoiceGuard]', safeError(e))); });
 const rolePanels = createRolePanels({ client, guildId: GUILD_ID, dir, safeError });
 client.on('interactionCreate', async i => {
+  if (await voiceGuard.handle(i)) return;
   if (await rolePanels.handle(i)) return;
   if (!i.isChatInputCommand() || i.commandName !== 'live') return;
   if (i.guildId !== GUILD_ID || !i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))
@@ -123,13 +127,14 @@ let timer;
 client.once('clientReady', async () => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON()]);
-    console.log('Ready v1.3: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
+    await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON(), voiceGuardCommand.toJSON()]);
+    console.log('Ready v1.4: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
     const tick = async () => { const start = Date.now(); await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, Math.max(500, intervalMs - (Date.now() - start))); };
     tick();
+    voiceGuard.sweep(guild).catch(e => console.error('[VoiceGuard]', safeError(e)));
   } catch (e) { console.error(safeError(e)); process.exit(1); }
 });
 client.on('error', e => console.error(safeError(e)));
 http.createServer((req, res) => { res.writeHead(client.isReady() ? 200 : 503); res.end(client.isReady() ? 'OK' : 'Starting'); }).listen(Number(process.env.PORT || 3000));
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { clearTimeout(timer); client.destroy(); process.exit(0); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { clearTimeout(timer); voiceGuard.stop(); client.destroy(); process.exit(0); });
 client.login(DISCORD_TOKEN).catch(e => { console.error(safeError(e)); process.exit(1); });
