@@ -1,16 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { SlashCommandBuilder, PermissionFlagsBits as P, ChannelType, MessageFlags, ActionRowBuilder, RoleSelectMenuBuilder, StringSelectMenuBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits as P, ChannelType, MessageFlags, ActionRowBuilder, RoleSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 
 const adminPermissions = P.ManageGuild | P.ManageRoles;
 const dangerous = [P.Administrator, P.ManageRoles, P.ManageGuild, P.ManageChannels, P.ManageWebhooks, P.KickMembers, P.BanMembers, P.ModerateMembers, P.ManageMessages];
-export const rolePanelCommand = new SlashCommandBuilder().setName('rolepanel').setDescription('選択式ロールパネルを管理')
+export const rolePanelCommand = new SlashCommandBuilder().setName('rolepanel').setDescription('ボタン式ロールパネルを管理')
  .setDefaultMemberPermissions(adminPermissions).setDMPermission(false)
- .addSubcommand(s => s.setName('create').setDescription('ロール選択パネルを作成')
+ .addSubcommand(s => s.setName('create').setDescription('複数ボタンのロールパネルを作成')
   .addChannelOption(o => o.setName('channel').setDescription('設置先チャンネル').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
   .addStringOption(o => o.setName('title').setDescription('パネルのタイトル').setMaxLength(256))
   .addStringOption(o => o.setName('message').setDescription('説明文。\\nで改行').setMaxLength(1500)))
+ .addSubcommand(s => s.setName('buttons').setDescription('既存パネルをボタン式に変更')
+  .addStringOption(o => o.setName('id').setDescription('listで表示されるパネルID').setRequired(true)))
  .addSubcommand(s => s.setName('list').setDescription('作成済みパネル一覧'))
  .addSubcommand(s => s.setName('delete').setDescription('パネルを無効化し、投稿を削除（付与済みロールは残ります）')
   .addStringOption(o => o.setName('id').setDescription('listで表示されるパネルID').setRequired(true)));
@@ -26,6 +28,18 @@ export function validateRole(role, bot, actor, ownerId) {
 export function roleChanges(ids, held) {
  return { add: ids.filter(id => !held.has(id)), remove: ids.filter(id => held.has(id)) };
 }
+
+export function buttonRows(id, ids, roles) {
+ const rows = [];
+ for (let offset = 0; offset < ids.length; offset += 5) {
+  rows.push(new ActionRowBuilder().addComponents(ids.slice(offset, offset + 5).map(rid =>
+   new ButtonBuilder().setCustomId('rp:button:' + id + ':' + rid)
+    .setLabel((roles.get(rid)?.name || '削除済みロール').slice(0, 80))
+    .setStyle(ButtonStyle.Primary).setDisabled(!roles.has(rid)))));
+ }
+ return rows;
+}
+
 export function createRolePanels({ client, guildId, dir, safeError = e => String(e.message || e) }) {
  const file = path.join(dir, 'rolepanels.json');
  let panels = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
@@ -39,7 +53,7 @@ export function createRolePanels({ client, guildId, dir, safeError = e => String
  }
  async function handle(i) {
   const command = i.isChatInputCommand() && i.commandName === 'rolepanel';
-  const component = (i.isRoleSelectMenu() || i.isStringSelectMenu()) && i.customId.startsWith('rp:');
+  const component = (i.isRoleSelectMenu() || i.isStringSelectMenu() || i.isButton?.()) && i.customId.startsWith('rp:');
   if (!command && !component) return false;
   try {
    if (i.guildId !== guildId) { await i.reply({ content: '設定されたサーバーで使用してください。', flags: MessageFlags.Ephemeral }); return true; }
@@ -53,16 +67,31 @@ export function createRolePanels({ client, guildId, dir, safeError = e => String
      const id = randomUUID();
      drafts.set(id, { user: i.user.id, time: Date.now(), channel: i.options.getChannel('channel').id,
       title: i.options.getString('title') || 'ロールを選択',
-      message: (i.options.getString('message') || '欲しいロールを選択してください。').replace(/\\n/g, '\n') });
+      message: (i.options.getString('message') || '欲しいロールのボタンを押してください。複数のロールを取得できます。').replace(/\\n/g, '\n') });
      const row = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('rp:build:' + id)
       .setPlaceholder('配布するロールを選択（最大25個）').setMinValues(1).setMaxValues(25));
-     await i.editReply({ content: '配布するロールを選んで確定すると、指定チャンネルへパネルを投稿します。', components: [row], allowedMentions: { parse: [] } });
+     await i.editReply({ content: 'ボタンにするロールを選んで確定してください。選んだロールごとにボタンを作成します（最大25個）。', components: [row], allowedMentions: { parse: [] } });
     } else if (sub === 'list') {
      const rows = Object.entries(panels).map(([id,p]) => id + '\n' + p.title + ' — https://discord.com/channels/' + guildId + '/' + p.channel + '/' + p.messageId);
      // Attach full list if it exceeds Discord's message limit.
      const content = rows.join('\n\n') || 'パネルはまだありません。';
      if (content.length > 1900) await i.editReply({ content: 'パネル一覧', files: [{ attachment: Buffer.from(content), name: 'rolepanels.txt' }] });
      else await i.editReply({ content, allowedMentions: { parse: [] } });
+    } else if (sub === 'buttons') {
+     const id = i.options.getString('id');
+     await lock('panel:' + id, async () => {
+      const panel = panels[id]; if (!panel) throw new Error('そのパネルIDはありません。');
+      const roles = await i.guild.roles.fetch();
+      const bot = await i.guild.members.fetchMe();
+      const actor = await i.guild.members.fetch({ user: i.user.id, force: true });
+      for (const rid of panel.roles) validateRole(roles.get(rid), bot, actor, i.guild.ownerId);
+      const ch = await client.channels.fetch(panel.channel);
+      const message = await ch.messages.fetch(panel.messageId);
+      await message.edit({ components: buttonRows(id, panel.roles, roles),
+       embeds: message.embeds.map(embed => EmbedBuilder.from(embed).setFooter({ text: '押すと付与・もう一度押すと解除。複数のロールを取得できます。' })),
+       allowedMentions: { parse: [] } });
+      await i.editReply({ content: 'ボタン式に変更しました。複数のロールを取得できます。' });
+     });
     } else if (sub === 'delete') {
      const id = i.options.getString('id');
      await lock('panel:' + id, async () => {
@@ -90,26 +119,27 @@ export function createRolePanels({ client, guildId, dir, safeError = e => String
      if (!ch || ch.guildId !== guildId || !ch.isTextBased()) throw new Error('設置先チャンネルが見つかりません。');
      const perms = ch.permissionsFor(bot);
      if (!perms?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks])) throw new Error('設置先でBOTに「チャンネルを見る」「メッセージを送信」「埋め込みリンク」を許可してください。');
-     const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('rp:toggle:' + id)
-      .setPlaceholder('選んだロールを付ける／外す').setMinValues(1).setMaxValues(ids.length)
-      .addOptions(ids.map(rid => ({ label: roles.get(rid).name.slice(0,100), value: rid }))));
+     const rows = buttonRows(id, ids, roles);
      let sent;
      try {
       sent = await ch.send({ embeds: [new EmbedBuilder().setColor(0x8b5cf6).setTitle(draft.title).setDescription(draft.message)
-       .setFooter({ text: '選択したロール：持っていなければ付与、持っていれば解除。選んでいないロールは変更しません。' })],
-       components: [row], allowedMentions: { parse: [] } });
+       .setFooter({ text: '押すと付与・もう一度押すと解除。複数のロールを取得できます。' })],
+       components: rows, allowedMentions: { parse: [] } });
       panels[id] = { channel: ch.id, messageId: sent.id, roles: ids, title: draft.title }; save();
      } catch(e) { delete panels[id]; if (sent) await sent.delete().catch(() => {}); throw e; }
      drafts.delete(id);
      await i.editReply({ content: 'パネルを作成しました。\n' + sent.url + '\nID: ' + id, allowedMentions: { parse: [] } });
     });
    } else {
-    const id = i.customId.slice('rp:toggle:'.length);
+    const isButton = i.isButton?.() && i.customId.startsWith('rp:button:');
+    if (!isButton && !i.customId.startsWith('rp:toggle:')) throw new Error('無効なボタンです。');
+    const parts = isButton ? i.customId.split(':') : [];
+    const id = isButton ? parts[2] : i.customId.slice('rp:toggle:'.length);
     // Same panel cannot be deleted during assignment; same member cannot be edited concurrently.
     await lock('panel:' + id, () => lock('member:' + i.user.id, async () => {
      const panel = panels[id];
      if (!panel || panel.messageId !== i.message.id || panel.channel !== i.channelId) throw new Error('このロールパネルは無効です。');
-     const ids = [...new Set(i.values)];
+     const ids = isButton ? [parts[3]] : [...new Set(i.values)];
      if (!ids.length || ids.some(rid => !panel.roles.includes(rid))) throw new Error('登録されていないロールです。');
      const bot = await i.guild.members.fetchMe();
      const roles = await i.guild.roles.fetch();

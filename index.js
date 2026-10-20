@@ -124,7 +124,7 @@ client.once('clientReady', async () => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
     await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON()]);
-    console.log('Ready v1.2: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
+    console.log('Ready v1.3: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
     const tick = async () => { const start = Date.now(); await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, Math.max(500, intervalMs - (Date.now() - start))); };
     tick();
   } catch (e) { console.error(safeError(e)); process.exit(1); }
