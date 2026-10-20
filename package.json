@@ -1,11 +1,12 @@
 {
   "name": "tiktoklivenotify",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js"
+    "check": "node --check index.js",
+    "test": "node verify.mjs && node verify-roles.mjs"
   },
   "keywords": [],
   "author": "",

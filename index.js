@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } from 'discord.js';
-import { TikTokLiveConnection, UserOfflineError } from 'tiktok-live-connector';
+import { resolveLive } from './detector.js';
+import { createRolePanels, rolePanelCommand } from './rolepanels.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !GUILD_ID) throw new Error('RailwayにDISCORD_TOKENとGUILD_IDを設定してください');
@@ -14,7 +15,9 @@ if (fs.existsSync(file)) state = { ...state, ...JSON.parse(fs.readFileSync(file,
 function save() { fs.writeFileSync(file + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 }); fs.renameSync(file + '.tmp', file); }
 save();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const health = { checked: 'なし', result: '未確認', error: '', sent: 'なし' };
+const health = { checked: 'なし', result: '未確認', error: '', sent: 'なし', details: {}, action: 'なし' };
+const configuredInterval = Number(process.env.POLL_SECONDS || 10);
+const intervalMs = (Number.isFinite(configuredInterval) ? Math.max(10, configuredInterval) : 10) * 1000;
 let queue = Promise.resolve();
 function serial(fn) { const task = queue.then(fn); queue = task.catch(() => {}); return task; }
 function safeError(e) {
@@ -43,22 +46,20 @@ async function detect() {
   if (!state.enabled || !state.user || !state.channel) return;
   health.checked = new Date().toISOString();
   try {
-    const connection = new TikTokLiveConnection(state.user, {
-      ...(process.env.SIGN_API_KEY ? { signApiKey: process.env.SIGN_API_KEY } : {}),
-      webClientOptions: { timeout: { request: 15000 }, retry: { limit: 0 } }
-    });
-    const live = await connection.fetchIsLive();
-    health.result = live ? '配信中' : '未配信'; health.error = '';
-    if (!live) return;
-    const room = String(await connection.fetchRoomId());
-    if (!/^\d+$/.test(room)) throw new Error('配信IDを取得できませんでした。');
+    const result = await resolveLive(state.user);
+    health.details = result.details;
+    health.result = result.live ? '配信中 (' + result.source + ')' : '未配信'; health.error = '';
+    if (!result.live) { health.action = '配信開始待ち'; return; }
+    const room = result.room;
     const key = state.user + ':' + room;
-    if (state.rooms.includes(key)) return;
-    if (Date.now() - state.manual > 600000) await notify();
+    if (state.rooms.includes(key)) { health.action = 'この配信は通知済み（重複防止）'; return; }
+    if (Date.now() - state.manual > 600000) { await notify(); health.action = '自動通知を送信しました'; }
+    else health.action = '直前に手動通知済みのため抑制';
     state.rooms = [...state.rooms, key].slice(-200); save();
   } catch (e) {
-    if (e instanceof UserOfflineError) { health.result = '未配信'; health.error = ''; }
-    else { health.result = '確認失敗'; health.error = safeError(e); console.error('[TikTok]', health.error); }
+    health.result = '確認失敗'; health.error = safeError(e);
+    health.details = e.details || health.details;
+    console.error('[TikTok]', health.error, Object.fromEntries(Object.entries(health.details).map(([k,v]) => [k,safeError(v)])));
   }
 }
 const cmd = new SlashCommandBuilder().setName('live').setDescription('TikTok LIVE通知')
@@ -75,14 +76,17 @@ const cmd = new SlashCommandBuilder().setName('live').setDescription('TikTok LIV
   .addSubcommand(s => s.setName('test').setDescription('テスト送信（メンションなし）'))
   .addSubcommand(s => s.setName('notify').setDescription('手動で配信通知を送信（メンションあり）'))
   .addSubcommand(s => s.setName('check').setDescription('今すぐ検知（配信中なら通知）'))
-  .addSubcommand(s => s.setName('status').setDescription('設定・検知状況・エラーを表示'));
+  .addSubcommand(s => s.setName('status').setDescription('設定・検知状況・エラーを表示'))
+  .addSubcommand(s => s.setName('debug').setDescription('検知失敗の経路別エラーを表示'));
 function status() {
   return ['TikTok: @' + (state.user || '未設定'), '通知先: ' + (state.channel ? '<#' + state.channel + '>' : '未設定'),
     'ロール: ' + (state.role ? '<@&' + state.role + '>' : 'なし'), '自動検知: ' + (state.enabled ? 'ON' : 'OFF'),
-    '状態: ' + health.result, '最終確認: ' + health.checked, '最終送信: ' + health.sent, 'エラー: ' + (health.error || 'なし'),
+    '確認間隔: ' + intervalMs / 1000 + '秒', '状態: ' + health.result, '処理: ' + health.action, '最終確認: ' + health.checked, '最終送信: ' + health.sent, 'エラー: ' + (health.error || 'なし'),
     '通知文:\n' + state.message].join('\n').slice(0, 1950);
 }
+const rolePanels = createRolePanels({ client, guildId: GUILD_ID, dir, safeError });
 client.on('interactionCreate', async i => {
+  if (await rolePanels.handle(i)) return;
   if (!i.isChatInputCommand() || i.commandName !== 'live') return;
   if (i.guildId !== GUILD_ID || !i.memberPermissions?.has(PermissionFlagsBits.ManageGuild))
     return i.reply({ content: 'このサーバーの管理権限が必要です。', flags: MessageFlags.Ephemeral });
@@ -107,7 +111,9 @@ client.on('interactionCreate', async i => {
     }
     if (sub === 'check') { await detect(); reply = status(); }
     if (sub === 'status') reply = status();
+    if (sub === 'debug') reply = ['TikTok: @' + state.user, '最終確認: ' + health.checked, '処理: ' + health.action, ...Object.entries(health.details).map(([k,v]) => k + ': ' + safeError(v)), 'エラー: ' + (health.error || 'なし'), process.env.SIGN_API_KEY ? 'Eulerキー: 設定済み' : 'Eulerキー: 未設定（TikTok直接取得の2経路）'].join('\u005cn').slice(0,1950);
     await i.editReply({ content: reply, allowedMentions: { parse: [] } });
+    if (sub === 'setup' || (sub === 'toggle' && state.enabled)) setImmediate(() => serial(detect).catch(e => console.error(safeError(e))));
   }); } catch (e) {
     console.error('[Command]', safeError(e));
     await i.editReply({ content: 'エラー: ' + safeError(e), allowedMentions: { parse: [] } }).catch(() => {});
@@ -117,9 +123,9 @@ let timer;
 client.once('clientReady', async () => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    await guild.commands.set([cmd.toJSON()]);
-    console.log('Ready: ' + client.user.tag + '; interval=60s; data=' + dir);
-    const tick = async () => { await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, 60000); };
+    await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON()]);
+    console.log('Ready v1.2: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
+    const tick = async () => { const start = Date.now(); await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, Math.max(500, intervalMs - (Date.now() - start))); };
     tick();
   } catch (e) { console.error(safeError(e)); process.exit(1); }
 });
