@@ -1,0 +1,59 @@
+NamazuBOT / Minecraft招待 更新版
+
+【ZIPの中身】
+NamazuBOT-main = Discord BOT用。中のファイルをDiscord側GitHubへ上書き。
+NamazuMCBOT = Minecraft BOT用。中のファイルをNamazuMCBOTのGitHubへ上書き。
+各フォルダそのものではなく、中身をそれぞれのリポジトリ直下へ入れてください。
+既存のDISCORD_TOKEN / GUILD_IDはそのままです。
+
+【1. 再起動してもデータを残す】
+DiscordのNamazuBOTにもRailway Volumeを追加し、Mount Pathを /data にします。
+Minecraft側のVolume /dataはそのまま残してください。
+各サービスは別々のVolumeを使います。レプリカは各1個。
+コードはRAILWAY_VOLUME_MOUNT_PATHを最優先で使い、全てのコマンド設定を保存します。
+DATA_DIR=/dataという変数だけでは永続化されません。Volumeの接続が必要です。
+Volumeを削除・Wipeしなければ、以後の再起動やファイル更新でも設定は残ります。
+すでに消えた設定は復元できません。
+今の旧サービスにだけ設定が残っている場合、更新・Volume追加前に旧/app/dataを退避してください。
+退避したsettings.json、rolepanels.json、voiceguard.jsonを新Volumeの/data直下へ戻せます。
+旧データが同じ起動環境の/app/dataに存在する場合は、未保存ファイルだけ自動移行します。
+
+【2. DiscordとMinecraftを接続】
+Minecraft側RailwayのVariables:
+MC_API_KEY = 自分で決めた長いランダム文字列（他人に公開しない）
+
+Minecraft側Settings → Networking → Generate Domain。
+Target Portを聞かれた場合はPORT変数の値、未設定なら3000。
+発行されたhttps://から始まるURLをコピー。
+
+Discord側RailwayのVariables:
+MC_BOT_URL = 上でコピーしたhttps://...のURL
+MC_API_KEY = Minecraft側と同じ文字列
+
+両方をDeploy。Minecraft側の認証が求められた場合のみ、最新コードでBOTアカウントにログイン。
+
+【3. 一斉招待ボタン】
+Discordの設置したいチャンネルで /mc panel を実行。
+「フレンド全員を招待」を押すと1回の一斉招待を開始します。
+管理者のみ実行できます。「状態確認」ボタンまたは /mc status で成功数・失敗数を確認。
+ボタンはBOT再起動後も使えます。60秒の連打防止・同時実行防止あり。
+APIの成功数はXboxに受理された数です。端末の受信確認数ではありません。
+
+【4. 自動承認と自動招待】
+フレンド申請イベントを受信するとすぐ確認し、取りこぼしは5秒間隔で再確認。
+旧フォロー方式は15秒間隔で確認。Xbox応答や制限次第でさらに遅れる場合があります。
+承認/追加成功した相手だけ、約2秒後に1回招待。HTTPエラー時のみ最大3回まで試行。
+起動時に既存フレンド全員へ送る処理や、定期的一斉招待はありません。
+申請が起動前から保留になっていた場合は、それを承認した後に招待します。
+招待APIが成功した後に勝手に繰り返し送りません。
+
+【ログ】
+[FRIEND ACCEPTED] = 新規承認/追加
+[INVITE API ACCEPTED] = Xboxが招待要求を受理（Minecraftの通知受信までは確認不可）
+[MC ERROR] = 承認/招待失敗理由
+文字化け防止のためMinecraft側のログは英語表記です。
+
+【検証】
+Discord既存機能のテスト、データ保存先と移行、管理者ボタン、再起動後ボタン、
+MC新規承認からの招待、既存フレンド起動時送信なし、再試行、API認証、手動一斉招待をモックで検証。
+実際のMicrosoftアカウント・Discordへのログイン、端末の招待受信は未検証です。

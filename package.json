@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "check": "node --check index.js",
-    "test": "node verify.mjs && node verify-roles.mjs && node verify-voice.mjs"
+    "test": "node verify.mjs && node verify-roles.mjs && node verify-voice.mjs && node verify-mc.mjs"
   },
   "keywords": [],
   "author": "",
