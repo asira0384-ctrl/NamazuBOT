@@ -131,7 +131,7 @@ client.once('clientReady', async () => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
     await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON(), voiceGuardCommand.toJSON(), ticketCommand.toJSON()]);
-    console.log('Ready v1.5: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
+    console.log('Ready v1.6: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
     const tick = async () => { const start = Date.now(); await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, Math.max(500, intervalMs - (Date.now() - start))); };
     tick();
     voiceGuard.sweep(guild).catch(e => console.error('[VoiceGuard]', safeError(e)));

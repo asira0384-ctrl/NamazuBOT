@@ -20,8 +20,13 @@ export function ticketOverwrites(guildId, botId, owner, config, closed=false) {
  const denied = [P.CreatePublicThreads,P.CreatePrivateThreads,P.SendMessagesInThreads,...(closed?write:[])];
  for (const [ids,type] of [[config.roles,0],[[...config.users,owner],1]]) for(const id of ids)
   map.set(id,{id,type,allow:[...access,...(closed?[]:write)],deny:denied});
+ if (closed) map.set(owner,{id:owner,type:1,deny:[P.ViewChannel,P.SendMessages,P.ReadMessageHistory]});
  map.set(botId,{id:botId,type:1,allow:[...access,...write,P.ManageChannels,P.ManageRoles]});
  return [...map.values()];
+}
+export function ticketName(type, username) {
+ const name = username.toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu,'-').replace(/^-+|-+$/g,'').slice(0,70) || 'user';
+ return (type==='vip'?'ticket-vip-':'ticket-')+name;
 }
 export function createTickets({client,guildId,dir,safeError=e=>String(e.message||e)}) {
  const file=path.join(dir,'tickets.json');
@@ -49,24 +54,38 @@ export function createTickets({client,guildId,dir,safeError=e=>String(e.message|
   if(recovered){state.tickets[recovered.id]={type,owner:i.user.id,closed:false};save();return i.editReply('作成済みです：<#'+recovered.id+'>');}
   const parent=await channel(i.guild,config.category);if(parent?.type!==ChannelType.GuildCategory)throw new Error('カテゴリが見つかりません。setupで設定し直してください。');
   const t={type,owner:i.user.id,closed:false};
-  const ch=await i.guild.channels.create({name:(type==='vip'?'vip-':'ticket-')+i.user.id,type:ChannelType.GuildText,parent:parent.id,topic:marker(t),permissionOverwrites:ticketOverwrites(guildId,client.user.id,i.user.id,config),reason:'本人によるチケット作成'});
+  const ch=await i.guild.channels.create({name:ticketName(type,i.user.username || i.user.id),type:ChannelType.GuildText,parent:parent.id,topic:marker(t),permissionOverwrites:ticketOverwrites(guildId,client.user.id,i.user.id,config),reason:'本人によるチケット作成'});
   state.tickets[ch.id]=t;save();
   const embed=new EmbedBuilder().setColor(type==='vip'?0xf1c40f:0x5865f2).setTitle(type==='vip'?'🛒 Namazu+':'お問い合わせ').setDescription(type==='vip'?vipText:'お問い合わせ内容を書いてください。スタッフが対応します。');
   try{await ch.send({content:[...new Set([i.user.id,...config.users])].map(id=>'<@'+id+'>').concat(config.roles.map(id=>'<@&'+id+'>')).join(' '),embeds:[embed],components:[row('tk:close','close',ButtonStyle.Danger)],allowedMentions:{users:[...new Set([i.user.id,...config.users])],roles:config.roles}});}
   catch(e){return i.editReply('チケットは作成しました：<#'+ch.id+'>。案内投稿に失敗しました：'+safeError(e));}
   return i.editReply('チケットを作成しました：<#'+ch.id+'>');
  }
- async function close(i,confirm) {
+ async function close(i,action) {
   const t=state.tickets[i.channelId];if(!t)throw new Error('登録されたチケット内で使ってください。');
   const member=await i.guild.members.fetch(i.user.id), config=state.config[t.type];
-  if(i.user.id!==t.owner&&!member.permissions.has(P.Administrator)&&!config.users.includes(i.user.id)&&!config.roles.some(id=>member.roles.cache.has(id)))throw new Error('作成者・この窓口のスタッフ・管理者だけが閉じられます。');
-  if(t.closed)return i.editReply({content:'このチケットは閉じています。',components:[]});
-  if(!confirm)return i.editReply({content:'このチケットを閉じますか？会話は読み取り専用で残ります。',components:[row('tk:confirm','閉じる',ButtonStyle.Danger)]});
-  await i.channel.permissionOverwrites.set(ticketOverwrites(guildId,client.user.id,t.owner,config,true));
-  await i.channel.setTopic(marker(t,'closed'));
-  t.closed=true;save();
-  await i.channel.setName('closed-'+i.channel.name.slice(0,90)).catch(e=>console.error('[Ticket rename]',safeError(e)));
-  await i.editReply({content:'閉じました。履歴はこのチャンネルに残ります。',components:[]});
+  const staff=member.permissions.has(P.Administrator)||config.users.includes(i.user.id)||config.roles.some(id=>member.roles.cache.has(id));
+  if(action==='delete') {
+   if(t.type!=='vip'||!t.closed||!staff)throw new Error('閉じたVIPチケットはVIPスタッフ・管理者だけが完全削除できます。');
+  } else if(i.user.id!==t.owner&&!staff)throw new Error('作成者・この窓口のスタッフ・管理者だけが閉じられます。');
+  if(t.type==='normal'||action==='delete') {
+   await i.channel.delete('チケットを完全削除: '+i.user.id);
+   delete state.tickets[i.channelId];save();
+   await i.editReply({content:'チャンネルごと削除しました。',components:[]}).catch(()=>{});
+   return;
+  }
+  if(!t.closed&&action!=='confirm')return i.editReply({content:'VIPチケットを閉じますか？購入者から見えなくなり、スタッフ用に履歴が残ります。',components:[row('tk:confirm','閉じて購入者から非表示にする',ButtonStyle.Danger)]});
+  if(!t.closed) {
+   await i.channel.permissionOverwrites.set(ticketOverwrites(guildId,client.user.id,t.owner,config,true));
+   t.closed=true;save();
+   await i.channel.setTopic(marker(t,'closed')).catch(e=>console.error('[Ticket topic]',safeError(e)));
+  }
+  if(!t.staffPrompt) {
+   const mentions=config.users.map(id=>'<@'+id+'>').concat(config.roles.map(id=>'<@&'+id+'>')).join(' ');
+   const prompt=await i.channel.send({content:mentions+'\nVIPチケットを閉じました。購入者: <@'+t.owner+'>\nこのチケットを完全に削除しますか？',components:[row('tk:delete','チャンネルを完全に削除',ButtonStyle.Danger)],allowedMentions:{users:config.users,roles:config.roles}});
+   t.staffPrompt=prompt.id;save();
+  }
+  await i.editReply({content:'購入者から非表示にしました。履歴はスタッフに残り、スタッフ用の削除ボタンを投稿しました。',components:[]}).catch(()=>{});
  }
  async function handle(i) {
   const command=i.isChatInputCommand()&&i.commandName==='ticket';
@@ -77,7 +96,7 @@ export function createTickets({client,guildId,dir,safeError=e=>String(e.message|
    if(button&&i.message.author.id!==client.user.id)throw new Error('BOTが投稿したボタンを使ってください。');
    await i.deferReply({flags:MessageFlags.Ephemeral});
    await serial(async()=>{
-    if(button){if(i.customId==='tk:close'||i.customId==='tk:confirm')return close(i,i.customId==='tk:confirm');const type=i.customId.split(':')[2];if(i.customId==='tk:open:'+type&&labels[type])return open(i,type);throw new Error('無効なボタンです。');}
+    if(button){if(['tk:close','tk:confirm','tk:delete'].includes(i.customId))return close(i,i.customId.slice(3));const type=i.customId.split(':')[2];if(i.customId==='tk:open:'+type&&labels[type])return open(i,type);throw new Error('無効なボタンです。');}
     const sub=i.options.getSubcommand(),type=i.options.getString('type');
     if(sub==='status')return i.editReply({content:Object.entries(state.config).map(([k,c])=>labels[k]+': カテゴリ '+(c.category?'<#'+c.category+'>':'未設定')+'\n個人: '+(c.users.map(id=>'<@'+id+'>').join(' ')||'なし')+'\nロール: '+(c.roles.map(id=>'<@&'+id+'>').join(' ')||'なし')).join('\n\n').slice(0,1950),allowedMentions:{parse:[]}});
     const c=state.config[type];
