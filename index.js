@@ -1,6 +1,5 @@
+import { createTickets, ticketCommand } from './tickets.js';
 import fs from 'node:fs';
-import { prepareDataDir } from './storage.js';
-import { createMcControl, mcCommand } from './mccontrol.js';
 import path from 'node:path';
 import http from 'node:http';
 import { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } from 'discord.js';
@@ -10,7 +9,7 @@ import { createVoiceGuard, voiceGuardCommand } from './voiceguard.js';
 
 const { DISCORD_TOKEN, GUILD_ID } = process.env;
 if (!DISCORD_TOKEN || !GUILD_ID) throw new Error('RailwayにDISCORD_TOKENとGUILD_IDを設定してください');
-const dir = prepareDataDir();
+const dir = process.env.DATA_DIR || './data';
 fs.mkdirSync(dir, { recursive: true });
 const file = path.join(dir, 'settings.json');
 let state = { user: '', channel: '', role: '', message: '{user} がTikTok LIVEを開始しました！\n{url}', enabled: true, rooms: [], manual: 0 };
@@ -25,7 +24,7 @@ let queue = Promise.resolve();
 function serial(fn) { const task = queue.then(fn); queue = task.catch(() => {}); return task; }
 function safeError(e) {
   let s = String(e?.message || e);
-  for (const key of [DISCORD_TOKEN, process.env.SIGN_API_KEY, process.env.MC_API_KEY]) if (key) s = s.split(key).join('[REDACTED]');
+  for (const key of [DISCORD_TOKEN, process.env.SIGN_API_KEY]) if (key) s = s.split(key).join('[REDACTED]');
   return s.replace(/https?:\/\/\S+/g, '[URL]').slice(0, 400);
 }
 function username(input) {
@@ -89,10 +88,10 @@ function status() {
 }
 const voiceGuard = createVoiceGuard({ client, guildId: GUILD_ID, dir, safeError });
 client.on('voiceStateUpdate', (oldState, newState) => { voiceGuard.onVoiceState(oldState, newState).catch(e => console.error('[VoiceGuard]', safeError(e))); });
+const tickets = createTickets({ client, guildId: GUILD_ID, dir, safeError });
 const rolePanels = createRolePanels({ client, guildId: GUILD_ID, dir, safeError });
-const mcControl = createMcControl({ guildId: GUILD_ID, safeError });
 client.on('interactionCreate', async i => {
-  if (await mcControl.handle(i)) return;
+  if (await tickets.handle(i)) return;
   if (await voiceGuard.handle(i)) return;
   if (await rolePanels.handle(i)) return;
   if (!i.isChatInputCommand() || i.commandName !== 'live') return;
@@ -131,8 +130,8 @@ let timer;
 client.once('clientReady', async () => {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON(), voiceGuardCommand.toJSON(), mcCommand.toJSON()]);
-    console.log('Ready v1.4: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
+    await guild.commands.set([cmd.toJSON(), rolePanelCommand.toJSON(), voiceGuardCommand.toJSON(), ticketCommand.toJSON()]);
+    console.log('Ready v1.5: ' + client.user.tag + '; interval=' + intervalMs / 1000 + 's; data=' + dir);
     const tick = async () => { const start = Date.now(); await serial(detect).catch(e => console.error(safeError(e))); timer = setTimeout(tick, Math.max(500, intervalMs - (Date.now() - start))); };
     tick();
     voiceGuard.sweep(guild).catch(e => console.error('[VoiceGuard]', safeError(e)));
