@@ -1,6 +1,13 @@
-# TikTok LIVE通知・ロール・チケットBOT v1.6
-1サーバー・1人用。Discordのコマンドで通知先、文章、ロールを設定します。
+# TikTok LIVE通知・ロール・チケットBOT v1.7
+複数サーバー対応。TikTok監視対象は各サーバー1人。Discordのコマンドで通知先、文章、ロールを設定します。
 
+
+## v1.7 別サーバーで使う
+同じRailwayサービスを更新し、既存のGUILD_IDと/dataのVolumeはそのままにしてください。
+旧設定は初回だけ元サーバーの /data/guilds/<ID>/ にコピーします。元ファイルも残ります。
+新しいサーバーに同じBOTをbot・applications.commandsのスコープで招待するとコマンドが登録されます。
+新しいサーバーでは必要な機能だけ初期設定してください。チケット、スタッフ、ロール、VC保護、配信通知は独立しています。
+新規導入で旧データがない場合、GUILD_IDは不要です。Railwayのレプリカは1つで運用してください。
 
 ## v1.6 チケットの終了方法・チャンネル名
 - 新規チャンネル名は `ticket-asira` / `ticket-vip-asira` 形式（Discordユーザー名を使用）。
@@ -86,7 +93,7 @@
 5. RailwayでNew Project → Deploy from GitHub repo → 対象リポジトリ。
 6. BOTサービスのVariablesに以下を登録：
    DISCORD_TOKEN = BOTのToken
-   GUILD_ID = サーバーID
+   GUILD_ID = 旧版の設定がある場合のみ、元のサーバーID（変更不要）
    DATA_DIR = /data
 7. BOTサービスにVolumeを追加し、Mount Pathを /data にする。
    Volumeがないと再デプロイで設定・通知済み配信IDが失われます。

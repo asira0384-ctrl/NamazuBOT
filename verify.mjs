@@ -19,11 +19,10 @@ assert.equal(r.source,'live');
 await assert.rejects(()=>probeSources([['bad',async()=>{throw new Error('403');}]]),/全経路/);
 process.env.DISCORD_TOKEN='test-token';process.env.GUILD_ID='123456789012345678';
 process.env.DATA_DIR=fs.mkdtempSync(path.join(os.tmpdir(),'live-test-'));
-const source=fs.readFileSync(new URL('./index.js',import.meta.url),'utf8');
-const fixture=new URL('./.verify-fixture.mjs',import.meta.url);
-fs.writeFileSync(fixture,source.split('let timer;')[0].replace("import { resolveLive } from './detector.js';","const resolveLive = (...args) => globalThis.mockResolve(...args);")+'\nexport { state, detect, payload, client, cmd, health };');
+const {createGuildRuntime,cmd}=await import('./guild-runtime.js');
+const client={channels:{}};
 try {
- const m=await import(fixture.href);
+ const m={...createGuildRuntime({client,guildId:process.env.GUILD_ID,dir:process.env.DATA_DIR,lookup:(...args)=>globalThis.mockResolve(...args)}),client,cmd};
  assert.equal(m.cmd.toJSON().options.length,9);
  m.state.user='test_user';m.state.channel='123';
  let sends=0,room='1111111111111111111';
@@ -39,4 +38,4 @@ try {
  assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR,'settings.json'))).rooms.length,2);
  m.state.role='456';assert.deepEqual(m.payload(true).allowedMentions.roles,[]);
  console.log('PASS: HTML variations; strict status; parallel blocked/offline/slow source handling; command schema; duplicate suppression; send-failure retry; persistent settings; safe test mentions');
-} finally {fs.unlinkSync(fixture);fs.rmSync(process.env.DATA_DIR,{recursive:true,force:true});}
+} finally {fs.rmSync(process.env.DATA_DIR,{recursive:true,force:true});}
