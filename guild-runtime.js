@@ -5,6 +5,8 @@ import { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } f
 import { resolveLive } from './detector.js';
 import { createRolePanels, rolePanelCommand } from './rolepanels.js';
 import { createVoiceGuard, voiceGuardCommand } from './voiceguard.js';
+import { createWelcome, welcomeCommand } from './welcome.js';
+export { welcomeCommand };
 
 const configuredInterval = Number(process.env.POLL_SECONDS || 10);
 const intervalMs = (Number.isFinite(configuredInterval) ? Math.max(10, configuredInterval) : 10) * 1000;
@@ -85,7 +87,9 @@ function status() {
 const voiceGuard = createVoiceGuard({ client, guildId: GUILD_ID, dir, safeError });
 const tickets = createTickets({ client, guildId: GUILD_ID, dir, safeError });
 const rolePanels = createRolePanels({ client, guildId: GUILD_ID, dir, safeError });
+const welcome = createWelcome({client,guildId:GUILD_ID,dir});
 async function handle(i) {
+  if (await welcome.handle(i)) return;
   if (await tickets.handle(i)) return;
   if (await voiceGuard.handle(i)) return;
   if (await rolePanels.handle(i)) return;
@@ -127,5 +131,5 @@ async function handle(i) {
   const tick=async()=>{if(stopped)return;const start=Date.now();await serial(detect).catch(e=>console.error(safeError(e)));if(!stopped)timer=setTimeout(tick,Math.max(500,intervalMs-(Date.now()-start)));};
   tick();voiceGuard.sweep(guild).catch(e=>console.error('[VoiceGuard]',safeError(e)));
  }
- return {handle,start,onVoice:voiceGuard.onVoiceState,stop(){stopped=true;clearTimeout(timer);voiceGuard.stop();},state,health,detect,payload};
+ return {handle,start,onVoice:voiceGuard.onVoiceState,onMemberJoin:welcome.joined,stop(){stopped=true;clearTimeout(timer);voiceGuard.stop();},state,health,detect,payload};
 }

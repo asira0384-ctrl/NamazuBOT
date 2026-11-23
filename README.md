@@ -1,6 +1,13 @@
-# TikTok LIVE通知・ロール・チケットBOT v1.7
+# TikTok LIVE通知・ロール・チケットBOT v1.8
 複数サーバー対応。TikTok監視対象は各サーバー1人。Discordのコマンドで通知先、文章、ロールを設定します。
 
+
+## v1.8 ウェルカム・一括削除
+Developer Portal → Bot → Privileged Gateway Intentsで **Server Members Intent** と **Message Content Intent** をONにしてください。無効だと参加メッセージと `!delete` が動きません。
+
+`/welcome setup` でチャンネル、埋め込みON/OFF、文章、タイトルを設定。文章では `{user}`（参加者メンション）、`{server}`（サーバー名）、`{count}`（参加人数）、`\n`（改行）が使えます。`/welcome test` でテスト、`/welcome off` で停止。設定はサーバー別に保存されます。
+
+管理者はチャンネルで `!delete 10` のように入力すると、コマンドを消して直近10件を削除します。成功後の「メッセージを削除しました」も約2秒で消えます。Discordの制限で一度に最大100件、14日より古いメッセージは一括削除できません。
 
 ## v1.7 別サーバーで使う
 同じRailwayサービスを更新し、既存のGUILD_IDと/dataのVolumeはそのままにしてください。

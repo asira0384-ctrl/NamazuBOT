@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-const files=['settings.json','rolepanels.json','voiceguard.json','tickets.json'];
+const files=['settings.json','rolepanels.json','voiceguard.json','tickets.json','welcome.json'];
 export function prepareStorage(root,legacyId) {
  const base=path.join(root,'guilds');
  fs.mkdirSync(base,{recursive:true});

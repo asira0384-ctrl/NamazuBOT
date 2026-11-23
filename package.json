@@ -1,12 +1,12 @@
 {
   "name": "tiktoklivenotify",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js",
-    "test": "node verify.mjs && node verify-roles.mjs && node verify-voice.mjs && node verify-tickets.mjs && node verify-guilds.mjs"
+    "check": "node --check index.js && node --check guild-runtime.js && node --check welcome.js",
+    "test": "node verify.mjs && node verify-roles.mjs && node verify-voice.mjs && node verify-tickets.mjs && node verify-guilds.mjs && node verify-welcome.mjs"
   },
   "keywords": [],
   "author": "",
