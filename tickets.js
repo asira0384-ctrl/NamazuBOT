@@ -3,12 +3,14 @@ import path from 'node:path';
 import { SlashCommandBuilder, PermissionFlagsBits as P, ChannelType, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 const labels = { normal: '通常', vip: 'VIP購入' };
 const vipText = 'NamazuSMPのサブスクとしてNamazu+を販売します！\n\n値段: **300円/月**\n特典: **home設定数上限が3個→7個・tab表示に[Namazu+]の表示**';
+const defaultMessages={normal:{title:'お問い合わせ',message:'お問い合わせ内容を書いてください。スタッフが対応します。'},vip:{title:'🛒 Namazu+',message:vipText}};
 const typeOption = s => s.addStringOption(o => o.setName('type').setDescription('窓口').setRequired(true).addChoices({name:'通常',value:'normal'},{name:'VIP購入',value:'vip'}));
 export const ticketCommand = new SlashCommandBuilder().setName('ticket').setDescription('通常・VIP購入チケットの設定').setDefaultMemberPermissions(P.ManageGuild).setDMPermission(false)
  .addSubcommand(s => typeOption(s.setName('setup').setDescription('作成先カテゴリを設定')).addChannelOption(o => o.setName('category').setDescription('チケット作成先').addChannelTypes(ChannelType.GuildCategory).setRequired(true)))
  .addSubcommand(s => typeOption(s.setName('staffadd').setDescription('スタッフを追加（繰り返して複数登録）')).addUserOption(o=>o.setName('user').setDescription('スタッフ個人')).addRoleOption(o=>o.setName('role').setDescription('スタッフロール')))
  .addSubcommand(s => typeOption(s.setName('staffremove').setDescription('スタッフを解除')).addUserOption(o=>o.setName('user').setDescription('スタッフ個人')).addRoleOption(o=>o.setName('role').setDescription('スタッフロール')))
  .addSubcommand(s => typeOption(s.setName('panel').setDescription('作成ボタンを投稿')).addChannelOption(o=>o.setName('channel').setDescription('投稿先').addChannelTypes(ChannelType.GuildText).setRequired(true)).addStringOption(o=>o.setName('title').setDescription('見出し').setMaxLength(256)).addStringOption(o=>o.setName('message').setDescription('説明文。\\nで改行').setMaxLength(1800)))
+ .addSubcommand(s => typeOption(s.setName('text').setDescription('チケット作成時の案内タイトル・本文を編集')).addStringOption(o=>o.setName('title').setDescription('案内タイトル').setRequired(true).setMaxLength(256)).addStringOption(o=>o.setName('message').setDescription('案内本文。\\nで改行').setRequired(true).setMaxLength(4000)))
  .addSubcommand(s => typeOption(s.setName('sync').setDescription('既存チケットのスタッフ権限を再同期')))
  .addSubcommand(s => s.setName('status').setDescription('設定を確認'));
 const row = (id,label,style=ButtonStyle.Primary) => new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style));
@@ -30,7 +32,8 @@ export function ticketName(type, username) {
 }
 export function createTickets({client,guildId,dir,safeError=e=>String(e.message||e)}) {
  const file=path.join(dir,'tickets.json');
- const state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{config:{normal:{category:null,users:[],roles:[]},vip:{category:null,users:[],roles:[]}},tickets:{}};
+ const state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{config:{normal:{category:null,users:[],roles:[]},vip:{category:null,users:[],roles:[]}},messages:structuredClone(defaultMessages),tickets:{}};
+ state.messages={...structuredClone(defaultMessages),...(state.messages||{})};
  const save=()=>{fs.writeFileSync(file+'.tmp',JSON.stringify(state,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);};
  let queue=Promise.resolve();
  const serial=fn=>{const job=queue.catch(()=>{}).then(fn);queue=job;return job;};
@@ -56,7 +59,8 @@ export function createTickets({client,guildId,dir,safeError=e=>String(e.message|
   const t={type,owner:i.user.id,closed:false};
   const ch=await i.guild.channels.create({name:ticketName(type,i.user.username || i.user.id),type:ChannelType.GuildText,parent:parent.id,topic:marker(t),permissionOverwrites:ticketOverwrites(guildId,client.user.id,i.user.id,config),reason:'本人によるチケット作成'});
   state.tickets[ch.id]=t;save();
-  const embed=new EmbedBuilder().setColor(type==='vip'?0xf1c40f:0x5865f2).setTitle(type==='vip'?'🛒 Namazu+':'お問い合わせ').setDescription(type==='vip'?vipText:'お問い合わせ内容を書いてください。スタッフが対応します。');
+  const panel=state.messages[type]||defaultMessages[type];
+  const embed=new EmbedBuilder().setColor(type==='vip'?0xf1c40f:0x5865f2).setTitle(panel.title).setDescription(panel.message.replace(/\\n/g,'\n'));
   try{await ch.send({content:[...new Set([i.user.id,...config.users])].map(id=>'<@'+id+'>').concat(config.roles.map(id=>'<@&'+id+'>')).join(' '),embeds:[embed],components:[row('tk:close','close',ButtonStyle.Danger)],allowedMentions:{users:[...new Set([i.user.id,...config.users])],roles:config.roles}});}
   catch(e){return i.editReply('チケットは作成しました：<#'+ch.id+'>。案内投稿に失敗しました：'+safeError(e));}
   return i.editReply('チケットを作成しました：<#'+ch.id+'>');
@@ -98,6 +102,7 @@ export function createTickets({client,guildId,dir,safeError=e=>String(e.message|
    await serial(async()=>{
     if(button){if(['tk:close','tk:confirm','tk:delete'].includes(i.customId))return close(i,i.customId.slice(3));const type=i.customId.split(':')[2];if(i.customId==='tk:open:'+type&&labels[type])return open(i,type);throw new Error('無効なボタンです。');}
     const sub=i.options.getSubcommand(),type=i.options.getString('type');
+    if(sub==='text'){const title=i.options.getString('title'),message=i.options.getString('message');if(!title.trim()||!message.trim())throw new Error('タイトルと本文を入力してください。');state.messages[type]={title:title.trim(),message};save();return i.editReply(labels[type]+'チケットを開いたときの案内を更新しました。次に作るチケットから反映されます。');}
     if(sub==='status')return i.editReply({content:Object.entries(state.config).map(([k,c])=>labels[k]+': カテゴリ '+(c.category?'<#'+c.category+'>':'未設定')+'\n個人: '+(c.users.map(id=>'<@'+id+'>').join(' ')||'なし')+'\nロール: '+(c.roles.map(id=>'<@&'+id+'>').join(' ')||'なし')).join('\n\n').slice(0,1950),allowedMentions:{parse:[]}});
     const c=state.config[type];
     if(sub==='setup'){c.category=i.options.getChannel('category').id;save();return i.editReply(labels[type]+'の作成先を設定しました。既存チケットは移動しません。');}

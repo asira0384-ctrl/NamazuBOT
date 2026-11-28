@@ -35,7 +35,9 @@ try {
  assert(normal.overwrites.some(o=>o.id==='normal-staff2'));
  assert(!normal.overwrites.some(o=>o.id==='vip-staff'));
  assert(!vip.overwrites.some(o=>o.id==='normal-staff'));
+ assert.equal(vip.message.embeds[0].toJSON().title,'🛒 Namazu+');
  assert(vip.message.embeds[0].toJSON().description.includes('300円/月'));
+ assert(vip.message.embeds[0].toJSON().description.includes('home設定数上限が3個→7個'));
  assert(normal.overwrites.find(o=>o.id==='guild').deny.includes(P.ViewChannel));
  await run({sub:'staffremove',args:{user:{id:'normal-staff'}}});
  assert(!normal.overwrites.some(o=>o.id==='normal-staff'),'staff removal affects existing channel');
@@ -52,9 +54,12 @@ try {
  assert(deniedDelete.replyData.content.startsWith('エラー:'));
  assert(channels.has(vip.id));
  assert(vip.overwrites.find(o=>o.id==='owner').deny.includes(P.SendMessages));
+ await run({sub:'text',type:'vip',args:{title:'VIP案内カスタム',message:'カスタム本文\\n2行目'}});
  tickets=createTickets({client:bot,guildId:'guild',dir,safeError:e=>e.message});
  await run({button:'tk:open:normal'});assert.equal(counter,2,'open ticket persists across restart');
  await run({button:'tk:open:vip'});assert.equal(counter,3,'closed ticket allows another ticket');
+ assert.equal(channels.get('channel-3').message.embeds[0].toJSON().title,'VIP案内カスタム');
+ assert(channels.get('channel-3').message.embeds[0].toJSON().description.includes('2行目'));
  await run({button:'tk:delete',channel:vip,user:'vip-staff'});
  assert(!channels.has(vip.id),'VIP staff can fully delete');
  await run({button:'tk:close',channel:normal});

@@ -1,6 +1,11 @@
-# TikTok LIVE通知・ロール・チケットBOT v1.8
+# TikTok LIVE通知・ロール・チケットBOT v1.9
 複数サーバー対応。TikTok監視対象は各サーバー1人。Discordのコマンドで通知先、文章、ロールを設定します。
 
+
+## v1.9 チケット内の案内を編集
+`/ticket text type:VIP購入 title:🛒 Namazu+ message:...` で、VIPチケットを作成したときの最初の案内タイトルと本文を変更できます。通常チケットも `type:通常` で設定可能。本文の `\n` は改行です。設定はサーバーごとに `tickets.json` へ保存され、Railway再起動後も残ります。変更後に開いたチケットから反映されます。
+
+初期のVIPタイトルと本文は、例の画像に合わせて「🛒 Namazu+」「NamazuSMPのサブスクとしてNamazu+を販売します！」「値段: 300円/月」「特典: home設定数上限が3個→7個・tab表示に[Namazu+]の表示」です。
 
 ## v1.8 ウェルカム・一括削除
 Developer Portal → Bot → Privileged Gateway Intentsで **Server Members Intent** と **Message Content Intent** をONにしてください。無効だと参加メッセージと `!delete` が動きません。
